@@ -16,7 +16,7 @@ const commandExecutionSchema = new mongoose.Schema({
   },
   executionTime: {
     type: Number, // in milliseconds
-    default: 0
+    required: true
   },
   timestamp: {
     type: Date,
@@ -28,6 +28,6 @@ const commandExecutionSchema = new mongoose.Schema({
 
 // Index for faster queries
 commandExecutionSchema.index({ timestamp: -1 });
-commandExecutionSchema.index({ command: 'text' });
+commandExecutionSchema.index({ command: 1 });
 
 module.exports = mongoose.model('CommandExecution', commandExecutionSchema);

@@ -2,22 +2,21 @@ const express = require('express');
 const router = express.Router();
 const commandService = require('../services/commandService');
 
-// POST /api/commands/execute - Execute a shell command
+// POST /api/commands/execute - Execute a command
 router.post('/commands/execute', async (req, res) => {
   try {
     const { command } = req.body;
-    
-    if (!command || typeof command !== 'string' || !command.trim()) {
+    console.log(`POST /api/commands/execute - Executing command: ${command}`);
+
+    if (!command || !command.trim()) {
       return res.status(400).json({
         success: false,
-        error: 'Command is required and must be a non-empty string'
+        error: 'Command is required'
       });
     }
-    
-    console.log(`POST /api/commands/execute - Executing command: ${command}`);
-    
-    const result = await commandService.executeCommand(command);
-    
+
+    const result = await commandService.executeCommand(command.trim());
+
     res.json({
       success: true,
       ...result
@@ -35,18 +34,13 @@ router.post('/commands/execute', async (req, res) => {
 router.get('/commands/history', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
-    
     console.log(`GET /api/commands/history - Fetching history (limit: ${limit})`);
-    
-    const history = await commandService.getCommandHistory(limit);
-    
-    // Transform for frontend compatibility
-    const historyCommands = history.map(cmd => cmd.command);
-    
+
+    const result = await commandService.getCommandHistory(limit);
+
     res.json({
       success: true,
-      history: historyCommands,
-      executions: history
+      ...result
     });
   } catch (error) {
     console.error('Error in GET /api/commands/history:', error);
@@ -61,32 +55,23 @@ router.get('/commands/history', async (req, res) => {
 router.get('/commands/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+    console.log(`GET /api/commands/${id} - Fetching command execution`);
+
     if (!id) {
       return res.status(400).json({
         success: false,
         error: 'Command execution ID is required'
       });
     }
-    
-    console.log(`GET /api/commands/${id} - Fetching command execution`);
-    
+
     const execution = await commandService.getCommandExecutionById(id);
-    
+
     res.json({
       success: true,
       execution: execution
     });
   } catch (error) {
     console.error(`Error in GET /api/commands/${req.params.id}:`, error);
-    
-    if (error.message === 'Command execution not found') {
-      return res.status(404).json({
-        success: false,
-        error: error.message
-      });
-    }
-    
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to fetch command execution'
@@ -98,13 +83,12 @@ router.get('/commands/:id', async (req, res) => {
 router.delete('/commands/history', async (req, res) => {
   try {
     console.log('DELETE /api/commands/history - Clearing command history');
-    
+
     const result = await commandService.clearCommandHistory();
-    
+
     res.json({
       success: true,
-      message: `Cleared ${result.deletedCount} command executions from history`,
-      deletedCount: result.deletedCount
+      ...result
     });
   } catch (error) {
     console.error('Error in DELETE /api/commands/history:', error);

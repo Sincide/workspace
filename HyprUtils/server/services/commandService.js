@@ -4,131 +4,135 @@ const CommandExecution = require('../models/CommandExecution');
 class CommandService {
   // Execute a shell command
   async executeCommand(command) {
-    return new Promise((resolve, reject) => {
-      console.log(`Executing command: ${command}`);
+    return new Promise(async (resolve, reject) => {
       const startTime = Date.now();
       
-      // Parse command and arguments
-      const parts = command.trim().split(/\s+/);
-      const cmd = parts[0];
-      const args = parts.slice(1);
-      
-      let output = '';
-      let errorOutput = '';
-      
-      // Spawn the process
-      const child = spawn(cmd, args, {
-        shell: true,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-      
-      // Collect stdout
-      child.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-      
-      // Collect stderr
-      child.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-      });
-      
-      // Handle process completion
-      child.on('close', async (code) => {
-        const executionTime = Date.now() - startTime;
-        const finalOutput = output + (errorOutput ? '\n' + errorOutput : '');
-        
-        console.log(`Command completed with exit code: ${code}, execution time: ${executionTime}ms`);
-        
-        try {
-          // Save to database
-          const commandExecution = new CommandExecution({
-            command: command.trim(),
-            output: finalOutput,
-            exitCode: code,
-            executionTime: executionTime
-          });
-          
-          const savedExecution = await commandExecution.save();
-          console.log(`Command execution saved to database with ID: ${savedExecution._id}`);
-          
-          resolve({
-            _id: savedExecution._id,
-            command: command.trim(),
-            output: finalOutput,
-            exitCode: code,
-            executionTime: executionTime,
-            timestamp: savedExecution.timestamp
-          });
-        } catch (error) {
-          console.error('Error saving command execution to database:', error);
-          reject(error);
-        }
-      });
-      
-      // Handle process errors
-      child.on('error', (error) => {
-        console.error(`Command execution error: ${error.message}`);
-        reject(new Error(`Failed to execute command: ${error.message}`));
-      });
-      
-      // Set timeout for long-running commands (30 seconds)
-      const timeout = setTimeout(() => {
-        child.kill('SIGTERM');
-        reject(new Error('Command execution timed out after 30 seconds'));
-      }, 30000);
-      
-      child.on('close', () => {
-        clearTimeout(timeout);
-      });
+      try {
+        console.log(`Executing command: ${command}`);
+
+        // Use fish shell if available, otherwise fall back to sh
+        const shell = process.env.SHELL || '/bin/sh';
+        const child = spawn(shell, ['-c', command], {
+          stdio: 'pipe',
+          env: process.env
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', (data) => {
+          stdout += data.toString();
+        });
+
+        child.stderr.on('data', (data) => {
+          stderr += data.toString();
+        });
+
+        child.on('close', async (code) => {
+          const endTime = Date.now();
+          const executionTime = endTime - startTime;
+          const output = stdout + (stderr ? '\n' + stderr : '');
+
+          try {
+            // Save execution to database
+            const execution = new CommandExecution({
+              command,
+              output,
+              exitCode: code || 0,
+              executionTime,
+              timestamp: new Date(startTime)
+            });
+
+            await execution.save();
+            console.log(`Command executed successfully with exit code: ${code || 0}`);
+
+            resolve({
+              _id: execution._id,
+              command,
+              output,
+              exitCode: code || 0,
+              executionTime,
+              timestamp: execution.timestamp
+            });
+          } catch (dbError) {
+            console.error('Error saving command execution:', dbError);
+            // Still resolve with the execution result even if DB save fails
+            resolve({
+              command,
+              output,
+              exitCode: code || 0,
+              executionTime,
+              timestamp: new Date(startTime)
+            });
+          }
+        });
+
+        child.on('error', (error) => {
+          console.error('Error executing command:', error);
+          reject(new Error(`Failed to execute command: ${error.message}`));
+        });
+
+      } catch (error) {
+        console.error('Error in executeCommand:', error);
+        reject(error);
+      }
     });
   }
-  
+
   // Get command history
   async getCommandHistory(limit = 50) {
     try {
       console.log(`Fetching command history (limit: ${limit})`);
-      
-      const history = await CommandExecution.find({})
+
+      const executions = await CommandExecution.find({})
         .sort({ timestamp: -1 })
         .limit(limit)
         .lean();
-      
-      console.log(`Retrieved ${history.length} command executions from history`);
-      return history;
+
+      // Extract unique commands for history dropdown
+      const uniqueCommands = [...new Set(executions.map(exec => exec.command))];
+
+      console.log(`Retrieved ${executions.length} command executions from history`);
+
+      return {
+        history: uniqueCommands,
+        executions: executions
+      };
     } catch (error) {
-      console.error('Error fetching command history:', error);
+      console.error('Error getting command history:', error);
       throw error;
     }
   }
-  
+
   // Get specific command execution by ID
   async getCommandExecutionById(id) {
     try {
       console.log(`Fetching command execution with ID: ${id}`);
-      
+
       const execution = await CommandExecution.findById(id).lean();
-      
       if (!execution) {
         throw new Error('Command execution not found');
       }
-      
-      console.log(`Retrieved command execution: ${execution.command}`);
+
       return execution;
     } catch (error) {
-      console.error('Error fetching command execution:', error);
+      console.error('Error getting command execution:', error);
       throw error;
     }
   }
-  
+
   // Clear command history
   async clearCommandHistory() {
     try {
       console.log('Clearing command history');
-      
+
       const result = await CommandExecution.deleteMany({});
-      
-      console.log(`Cleared ${result.deletedCount} command executions from history`);
-      return { deletedCount: result.deletedCount };
+      console.log(`Deleted ${result.deletedCount} command executions`);
+
+      return {
+        message: 'Command history cleared successfully',
+        deletedCount: result.deletedCount
+      };
     } catch (error) {
       console.error('Error clearing command history:', error);
       throw error;
